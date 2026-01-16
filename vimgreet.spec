@@ -6,7 +6,7 @@ Release:        1%{?dist}
 Summary:        A neovim-inspired greeter for greetd
 
 License:        Apache-2.0
-URL:            https://github.com/binarypie/vimgreet
+URL:            https://github.com/binarypie-dev/vimgreet
 Source0:        %{url}/archive/main/%{crate}-main.tar.gz
 
 BuildRequires:  rust >= 1.70
