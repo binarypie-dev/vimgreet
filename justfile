@@ -12,17 +12,23 @@ build:
 release:
     cargo build --release
 
-# Run in demo mode (for testing without greetd)
-demo: build
-    ./target/debug/vimgreet --demo
+# Run in dryrun mode (for testing without greetd)
+# Usage: just demo [ARGS]
+# Examples:
+#   just demo
+#   just demo --onboard
+demo *ARGS: build
+    ./target/debug/vimgreet --dryrun {{ARGS}}
 
-# Run release build in demo mode
-demo-release: release
-    ./target/release/vimgreet --demo
+# Run release build in dryrun mode
+# Usage: just demo-release [ARGS]
+demo-release *ARGS: release
+    ./target/release/vimgreet --dryrun {{ARGS}}
 
 # Run with debug logging to file
-demo-debug: build
-    RUST_LOG=debug ./target/debug/vimgreet --demo --log-file vimgreet.log
+# Usage: just demo-debug [ARGS]
+demo-debug *ARGS: build
+    RUST_LOG=debug ./target/debug/vimgreet --dryrun --log-file vimgreet.log {{ARGS}}
 
 # Run tests
 test:
@@ -82,5 +88,18 @@ deps:
     cargo tree
 
 # Run with logging to file
-demo-log: build
-    RUST_LOG=info ./target/debug/vimgreet --demo --log-file vimgreet.log
+# Usage: just demo-log [ARGS]
+demo-log *ARGS: build
+    RUST_LOG=info ./target/debug/vimgreet --dryrun --log-file vimgreet.log {{ARGS}}
+
+# Run onboard wizard in demo mode
+onboard: build
+    ./target/debug/vimgreet --onboard --config examples/demo.toml
+
+# Run onboard wizard in release mode
+onboard-release: release
+    ./target/release/vimgreet --onboard --config examples/demo.toml
+
+# Run onboard wizard with debug logging
+onboard-debug: build
+    RUST_LOG=debug ./target/debug/vimgreet --onboard --config examples/demo.toml --log-file onboard.log

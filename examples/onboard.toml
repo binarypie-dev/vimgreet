@@ -1,0 +1,173 @@
+# vimgreet onboard configuration
+# Copy to /etc/vimgreet/onboard.toml
+
+[general]
+title = "Hypercube Setup"
+subtitle = "Welcome to Hypercube Linux"
+# dryrun = true  # Uncomment to simulate all operations without making changes
+
+[network]
+enabled = true
+program = "wifitui"
+args = []
+skip_if_connected = true
+
+[user]
+groups = ["wheel"]
+shell = "/bin/bash"
+min_password_length = 8
+
+[locale]
+enabled = true
+default_locale = "en_US.UTF-8"
+# List of available locales (if empty, discover from system)
+available = []
+
+[keyboard]
+enabled = true
+default_layout = "us"
+# List of available layouts (if empty, discover from system)
+available = []
+
+[preferences]
+timezone_enabled = true
+default_timezone = "America/New_York"
+ntp_enabled = true
+keyring_enabled = true
+
+[completion]
+action = "reboot"
+remove_initial_session = true
+
+# Update categories - each contains packages that can be individually selected
+# enabled_by_default applies to all packages in the category unless overridden
+
+[[updates]]
+name = "System Updates"
+description = "System packages and security updates"
+enabled_by_default = true
+
+[[updates.packages]]
+title = "System Updates"
+description = "Install latest packages and security patches"
+required = true
+[[updates.packages.commands]]
+name = "Refreshing package cache"
+command = ["sudo", "dnf", "makecache"]
+sudo = true
+[[updates.packages.commands]]
+name = "Installing system updates"
+command = ["sudo", "dnf", "upgrade", "-y"]
+sudo = true
+
+[[updates]]
+name = "Flatpak Packages"
+description = "Applications from Flathub"
+enabled_by_default = true
+
+[[updates.packages]]
+title = "Flathub Repository"
+description = "Add the Flathub app store"
+required = true
+[[updates.packages.commands]]
+name = "Adding Flathub repository"
+command = ["flatpak", "remote-add", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"]
+sudo = false
+
+[[updates.packages]]
+title = "Firefox"
+description = "Fast, private web browser"
+[[updates.packages.commands]]
+name = "Installing Firefox"
+command = ["flatpak", "install", "-y", "flathub", "org.mozilla.firefox"]
+sudo = false
+
+[[updates.packages]]
+title = "Extension Manager"
+description = "Browse and install GNOME extensions"
+[[updates.packages.commands]]
+name = "Installing Extension Manager"
+command = ["flatpak", "install", "-y", "flathub", "com.mattjakeman.ExtensionManager"]
+sudo = false
+
+[[updates.packages]]
+title = "Flatseal"
+description = "Manage flatpak permissions"
+[[updates.packages.commands]]
+name = "Installing Flatseal"
+command = ["flatpak", "install", "-y", "flathub", "com.github.tchx84.Flatseal"]
+sudo = false
+
+[[updates.packages]]
+title = "Warehouse"
+description = "Manage installed flatpak apps"
+[[updates.packages.commands]]
+name = "Installing Warehouse"
+command = ["flatpak", "install", "-y", "flathub", "io.github.flattool.Warehouse"]
+sudo = false
+
+[[updates]]
+name = "Homebrew Packages"
+description = "Developer tools via Homebrew"
+enabled_by_default = false
+
+[[updates.packages]]
+title = "Homebrew"
+description = "Package manager for macOS and Linux"
+[[updates.packages.commands]]
+name = "Installing Homebrew"
+command = ["bash", "-c", "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"]
+sudo = false
+
+[[updates.packages]]
+title = "Neovim"
+description = "Hyperextensible text editor"
+[[updates.packages.commands]]
+name = "Installing Neovim"
+command = ["brew", "install", "neovim"]
+sudo = false
+
+[[updates.packages]]
+title = "ripgrep"
+description = "Fast recursive search tool"
+[[updates.packages.commands]]
+name = "Installing ripgrep"
+command = ["brew", "install", "ripgrep"]
+sudo = false
+
+[[updates.packages]]
+title = "fd"
+description = "Simple, fast file finder"
+[[updates.packages.commands]]
+name = "Installing fd"
+command = ["brew", "install", "fd"]
+sudo = false
+
+[[updates]]
+name = "Distrobox Images"
+description = "Container environments for development"
+enabled_by_default = false
+
+[[updates.packages]]
+title = "Fedora"
+description = "Fedora latest container"
+[[updates.packages.commands]]
+name = "Creating Fedora distrobox"
+command = ["distrobox", "create", "-n", "fedora", "-i", "fedora:latest"]
+sudo = false
+
+[[updates.packages]]
+title = "Ubuntu"
+description = "Ubuntu LTS container"
+[[updates.packages.commands]]
+name = "Creating Ubuntu distrobox"
+command = ["distrobox", "create", "-n", "ubuntu", "-i", "ubuntu:latest"]
+sudo = false
+
+[[updates.packages]]
+title = "Arch Linux"
+description = "Arch Linux container"
+[[updates.packages.commands]]
+name = "Creating Arch distrobox"
+command = ["distrobox", "create", "-n", "arch", "-i", "archlinux:latest"]
+sudo = false

@@ -1,12 +1,20 @@
 use std::process::Command;
 use tracing::{error, info};
 
-pub fn reboot() -> std::io::Result<()> {
+pub fn reboot(demo_mode: bool) -> std::io::Result<()> {
+    if demo_mode {
+        info!("Demo mode: skipping reboot");
+        return Ok(());
+    }
     info!("Executing reboot");
     execute_power_command(&["systemctl", "reboot"])
 }
 
-pub fn poweroff() -> std::io::Result<()> {
+pub fn poweroff(demo_mode: bool) -> std::io::Result<()> {
+    if demo_mode {
+        info!("Demo mode: skipping poweroff");
+        return Ok(());
+    }
     info!("Executing poweroff");
     execute_power_command(&["systemctl", "poweroff"])
 }
