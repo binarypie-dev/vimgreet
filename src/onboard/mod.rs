@@ -29,7 +29,7 @@ pub enum OnboardAction {
     ExecuteReview,
     /// Execute Update step - run system updates
     ExecuteUpdate,
-    /// Exit onboard and go to vimgreet login
+    /// Exit onboard and go to greeter login
     ExitToLogin,
     /// In dryrun mode: show fake reboot animation then transition to login
     TransitionToLogin,
@@ -982,7 +982,7 @@ impl OnboardApp {
                                     return Some(OnboardAction::ExecuteUpdate);
                                 }
                                 StepId::Reboot => {
-                                    // Exit to vimgreet login
+                                    // Exit to greeter login
                                     return Some(OnboardAction::ExitToLogin);
                                 }
                                 _ => {}

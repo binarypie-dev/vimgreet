@@ -1,4 +1,4 @@
-# vimgreet - neovim-inspired greetd greeter
+# hypercube-utils - TUI utilities for Hypercube Linux
 
 # Default recipe: show available commands
 default:
@@ -12,23 +12,21 @@ build:
 release:
     cargo build --release
 
-# Run in dryrun mode (for testing without greetd)
-# Usage: just demo [ARGS]
-# Examples:
-#   just demo
-#   just demo --onboard
-demo *ARGS: build
-    ./target/debug/vimgreet --dryrun {{ARGS}}
+# Run greeter in dryrun mode
+greeter *ARGS: build
+    ./target/debug/hypercube-greeter --dryrun {{ARGS}}
 
-# Run release build in dryrun mode
-# Usage: just demo-release [ARGS]
-demo-release *ARGS: release
-    ./target/release/vimgreet --dryrun {{ARGS}}
+# Run greeter release build in dryrun mode
+greeter-release *ARGS: release
+    ./target/release/hypercube-greeter --dryrun {{ARGS}}
 
-# Run with debug logging to file
-# Usage: just demo-debug [ARGS]
-demo-debug *ARGS: build
-    RUST_LOG=debug ./target/debug/vimgreet --dryrun --log-file vimgreet.log {{ARGS}}
+# Run onboard wizard in demo mode
+onboard *ARGS: build
+    ./target/debug/hypercube-onboard --dryrun {{ARGS}}
+
+# Run onboard wizard in release mode
+onboard-release *ARGS: release
+    ./target/release/hypercube-onboard --dryrun {{ARGS}}
 
 # Run tests
 test:
@@ -54,52 +52,15 @@ check:
 clean:
     cargo clean
 
-# Watch for changes and rebuild (requires cargo-watch)
-watch:
-    cargo watch -x check
-
-# Install to system (requires root)
-install: release
-    sudo install -Dm755 target/release/vimgreet /usr/local/bin/vimgreet
-
-# Uninstall from system
-uninstall:
-    sudo rm -f /usr/local/bin/vimgreet
-
-# Show binary size
-size: release
-    ls -lh target/release/vimgreet
-    @echo "Stripped size:"
-    @strip -s target/release/vimgreet -o /tmp/vimgreet-stripped && ls -lh /tmp/vimgreet-stripped
-
 # Run all checks (format, lint, test, build)
 ci: fmt-check lint test release
 
-# Generate documentation
-doc:
-    cargo doc --no-deps --open
+# Install to system (requires root)
+install: release
+    sudo install -Dm755 target/release/hypercube-greeter /usr/local/bin/hypercube-greeter
+    sudo install -Dm755 target/release/hypercube-onboard /usr/local/bin/hypercube-onboard
 
-# Update dependencies
-update:
-    cargo update
-
-# Show dependency tree
-deps:
-    cargo tree
-
-# Run with logging to file
-# Usage: just demo-log [ARGS]
-demo-log *ARGS: build
-    RUST_LOG=info ./target/debug/vimgreet --dryrun --log-file vimgreet.log {{ARGS}}
-
-# Run onboard wizard in demo mode
-onboard: build
-    ./target/debug/vimgreet --onboard --config examples/demo.toml
-
-# Run onboard wizard in release mode
-onboard-release: release
-    ./target/release/vimgreet --onboard --config examples/demo.toml
-
-# Run onboard wizard with debug logging
-onboard-debug: build
-    RUST_LOG=debug ./target/debug/vimgreet --onboard --config examples/demo.toml --log-file onboard.log
+# Uninstall from system
+uninstall:
+    sudo rm -f /usr/local/bin/hypercube-greeter
+    sudo rm -f /usr/local/bin/hypercube-onboard

@@ -1,3 +1,6 @@
+pub mod ui;
+pub mod widgets;
+
 use crate::ipc::{AuthResponse, GreetdClient};
 use crate::system::{discover_sessions, discover_users, Session, User};
 use crate::ui::Theme;

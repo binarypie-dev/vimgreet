@@ -1,4 +1,4 @@
-use crate::ui::Layout;
+use crate::greeter::ui::Layout;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 

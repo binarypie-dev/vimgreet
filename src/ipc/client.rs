@@ -1,4 +1,4 @@
-use crate::error::{Result, VimgreetError};
+use crate::error::{Result, HypercubeError};
 use greetd_ipc::{codec::SyncCodec, AuthMessageType, ErrorType, Request, Response};
 use std::os::unix::net::UnixStream;
 use tracing::{debug, error, info};
@@ -19,7 +19,7 @@ pub struct GreetdClient {
 impl GreetdClient {
     pub async fn connect() -> Result<Self> {
         let socket_path =
-            std::env::var("GREETD_SOCK").map_err(|_| VimgreetError::SocketNotFound)?;
+            std::env::var("GREETD_SOCK").map_err(|_| HypercubeError::SocketNotFound)?;
 
         info!("Connecting to greetd socket: {}", socket_path);
         let stream = UnixStream::connect(&socket_path)?;
@@ -82,9 +82,9 @@ impl GreetdClient {
                 description,
             } => {
                 error!("Session start failed: {:?} - {}", error_type, description);
-                Err(VimgreetError::SessionFailed(description))
+                Err(HypercubeError::SessionFailed(description))
             }
-            _ => Err(VimgreetError::SessionFailed(
+            _ => Err(HypercubeError::SessionFailed(
                 "Unexpected response".to_string(),
             )),
         }
@@ -99,7 +99,7 @@ impl GreetdClient {
 
         match response {
             Response::Success => Ok(()),
-            Response::Error { description, .. } => Err(VimgreetError::AuthFailed(description)),
+            Response::Error { description, .. } => Err(HypercubeError::AuthFailed(description)),
             _ => Ok(()),
         }
     }
@@ -108,7 +108,7 @@ impl GreetdClient {
         let stream = self
             .stream
             .as_mut()
-            .ok_or(VimgreetError::SocketNotFound)?;
+            .ok_or(HypercubeError::SocketNotFound)?;
 
         debug!("Sending request: {:?}", request);
         request.write_to(stream)?;

@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::path::Path;
 use tracing::info;
 
-const DEFAULT_CONFIG_PATH: &str = "/etc/vimgreet/onboard.toml";
+const DEFAULT_CONFIG_PATH: &str = "/etc/hypercube/onboard.toml";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]

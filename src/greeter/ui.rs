@@ -1,4 +1,8 @@
+use crate::greeter::App;
 use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
+use ratatui::Frame;
+
+use super::widgets;
 
 pub struct Layout {
     pub full: Rect,
@@ -10,8 +14,6 @@ pub struct Layout {
 
 impl Layout {
     pub fn new(area: Rect) -> Self {
-        // Always use the same layout - message panel space is always reserved
-        // This prevents the login box from jumping when messages appear/disappear
         let chunks = RatatuiLayout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -51,5 +53,35 @@ impl Layout {
             .split(horizontal[1]);
 
         vertical[1]
+    }
+}
+
+pub fn draw(frame: &mut Frame, app: &App) {
+    let layout = Layout::new(frame.area());
+
+    widgets::draw_background(frame, layout.full, &app.theme);
+    widgets::draw_header(frame, layout.header, app);
+    widgets::draw_login_form(frame, layout.content, app);
+
+    // Always draw message panel area (shows content only when there's a message)
+    widgets::draw_message_panel(frame, layout.message, app);
+
+    widgets::draw_status_bar(frame, layout.status, app);
+
+    // Popups render on top of everything
+    if app.show_session_picker {
+        widgets::draw_session_picker(frame, layout.content, app);
+    }
+
+    if app.show_user_picker {
+        widgets::draw_user_picker(frame, layout.content, app);
+    }
+
+    if app.show_help {
+        widgets::draw_help(frame, layout.content);
+    }
+
+    if let Some(ref confirm) = app.confirm_action {
+        widgets::draw_confirm_dialog(frame, layout.content, confirm);
     }
 }

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::greeter::App;
 use crate::vim::VimMode;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;

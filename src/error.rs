@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum VimgreetError {
+pub enum HypercubeError {
     #[error("greetd socket not found (GREETD_SOCK not set)")]
     SocketNotFound,
 
@@ -21,4 +21,4 @@ pub enum VimgreetError {
     Terminal(String),
 }
 
-pub type Result<T> = std::result::Result<T, VimgreetError>;
+pub type Result<T> = std::result::Result<T, HypercubeError>;

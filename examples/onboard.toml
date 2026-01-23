@@ -1,5 +1,5 @@
-# vimgreet onboard configuration
-# Copy to /etc/vimgreet/onboard.toml
+# hypercube-onboard configuration
+# Copy to /etc/hypercube/onboard.toml
 
 [general]
 title = "Hypercube Setup"

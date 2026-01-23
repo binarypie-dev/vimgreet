@@ -1,12 +1,22 @@
 [package]
-name = "vimgreet"
+name = "hypercube-utils"
 version = "0.1.0"
 edition = "2024"
 authors = ["binarypie"]
-description = "A neovim-inspired greeter for greetd"
+description = "TUI utilities for Hypercube Linux"
 license = "Apache-2.0"
-keywords = ["greetd", "greeter", "tui", "vim", "login"]
-categories = ["command-line-interface", "authentication"]
+
+[lib]
+name = "hypercube_utils"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hypercube-greeter"
+path = "src/bin/greeter.rs"
+
+[[bin]]
+name = "hypercube-onboard"
+path = "src/bin/onboard.rs"
 
 [dependencies]
 # TUI Framework

@@ -1,5 +1,5 @@
-use crate::app::{App, FocusField};
-use crate::ui::Layout;
+use crate::greeter::{App, FocusField};
+use crate::greeter::ui::Layout;
 use crate::vim::VimMode;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};

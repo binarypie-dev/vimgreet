@@ -536,6 +536,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypercube-utils"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "crossterm",
+ "dirs",
+ "futures",
+ "greetd_ipc",
+ "hostname",
+ "nix",
+ "ratatui",
+ "rust-ini",
+ "serde",
+ "shell-escape",
+ "shell-words",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "zeroize",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,32 +1398,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vimgreet"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "crossterm",
- "dirs",
- "futures",
- "greetd_ipc",
- "hostname",
- "nix",
- "ratatui",
- "rust-ini",
- "serde",
- "shell-escape",
- "shell-words",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "zeroize",
-]
 
 [[package]]
 name = "wasi"

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::greeter::App;
 use chrono::Local;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -9,7 +9,7 @@ pub fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "vimgreet".to_string());
+        .unwrap_or_else(|_| "hypercube".to_string());
 
     // Left side: hostname
     let left = Paragraph::new(Line::from(vec![

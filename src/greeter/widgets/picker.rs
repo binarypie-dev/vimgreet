@@ -1,5 +1,5 @@
-use crate::app::App;
-use crate::ui::Layout;
+use crate::greeter::App;
+use crate::greeter::ui::Layout;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
 
