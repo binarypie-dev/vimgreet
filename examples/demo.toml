@@ -104,6 +104,62 @@ name = "Installing Warehouse"
 command = ["flatpak", "install", "-y", "flathub", "io.github.flattool.Warehouse"]
 sudo = false
 
+[[updates.packages]]
+title = "Thunderbird"
+description = "Full-featured email client"
+[[updates.packages.commands]]
+name = "Installing Thunderbird"
+command = ["flatpak", "install", "-y", "flathub", "org.mozilla.Thunderbird"]
+sudo = false
+
+[[updates.packages]]
+title = "LibreOffice"
+description = "Full office productivity suite"
+[[updates.packages.commands]]
+name = "Installing LibreOffice"
+command = ["flatpak", "install", "-y", "flathub", "org.libreoffice.LibreOffice"]
+sudo = false
+
+[[updates.packages]]
+title = "GIMP"
+description = "Image editor and manipulation"
+[[updates.packages.commands]]
+name = "Installing GIMP"
+command = ["flatpak", "install", "-y", "flathub", "org.gimp.GIMP"]
+sudo = false
+
+[[updates.packages]]
+title = "VLC"
+description = "Multimedia player for all formats"
+[[updates.packages.commands]]
+name = "Installing VLC"
+command = ["flatpak", "install", "-y", "flathub", "org.videolan.VLC"]
+sudo = false
+
+[[updates.packages]]
+title = "Celluloid"
+description = "Simple GTK media player"
+[[updates.packages.commands]]
+name = "Installing Celluloid"
+command = ["flatpak", "install", "-y", "flathub", "io.github.celluloid_player.Celluloid"]
+sudo = false
+
+[[updates.packages]]
+title = "Transmission"
+description = "Lightweight BitTorrent client"
+[[updates.packages.commands]]
+name = "Installing Transmission"
+command = ["flatpak", "install", "-y", "flathub", "com.transmissionbt.Transmission"]
+sudo = false
+
+[[updates.packages]]
+title = "Bottles"
+description = "Run Windows apps and games"
+[[updates.packages.commands]]
+name = "Installing Bottles"
+command = ["flatpak", "install", "-y", "flathub", "com.usebottles.bottles"]
+sudo = false
+
 [[updates]]
 name = "Homebrew Packages"
 description = "Developer tools via Homebrew"
@@ -141,6 +197,62 @@ name = "Installing fd"
 command = ["brew", "install", "fd"]
 sudo = false
 
+[[updates.packages]]
+title = "fzf"
+description = "Command-line fuzzy finder"
+[[updates.packages.commands]]
+name = "Installing fzf"
+command = ["brew", "install", "fzf"]
+sudo = false
+
+[[updates.packages]]
+title = "bat"
+description = "Cat clone with syntax highlighting"
+[[updates.packages.commands]]
+name = "Installing bat"
+command = ["brew", "install", "bat"]
+sudo = false
+
+[[updates.packages]]
+title = "eza"
+description = "Modern replacement for ls"
+[[updates.packages.commands]]
+name = "Installing eza"
+command = ["brew", "install", "eza"]
+sudo = false
+
+[[updates.packages]]
+title = "zoxide"
+description = "Smarter cd command"
+[[updates.packages.commands]]
+name = "Installing zoxide"
+command = ["brew", "install", "zoxide"]
+sudo = false
+
+[[updates.packages]]
+title = "starship"
+description = "Cross-shell prompt"
+[[updates.packages.commands]]
+name = "Installing starship"
+command = ["brew", "install", "starship"]
+sudo = false
+
+[[updates.packages]]
+title = "lazygit"
+description = "Terminal UI for git"
+[[updates.packages.commands]]
+name = "Installing lazygit"
+command = ["brew", "install", "lazygit"]
+sudo = false
+
+[[updates.packages]]
+title = "delta"
+description = "Syntax-highlighting pager for git"
+[[updates.packages.commands]]
+name = "Installing delta"
+command = ["brew", "install", "git-delta"]
+sudo = false
+
 [[updates]]
 name = "Distrobox Images"
 description = "Container environments for development"
@@ -168,4 +280,20 @@ description = "Arch Linux container"
 [[updates.packages.commands]]
 name = "Creating Arch distrobox"
 command = ["distrobox", "create", "-n", "arch", "-i", "archlinux:latest"]
+sudo = false
+
+[[updates.packages]]
+title = "Debian"
+description = "Debian stable container"
+[[updates.packages.commands]]
+name = "Creating Debian distrobox"
+command = ["distrobox", "create", "-n", "debian", "-i", "debian:stable"]
+sudo = false
+
+[[updates.packages]]
+title = "openSUSE"
+description = "openSUSE Tumbleweed container"
+[[updates.packages.commands]]
+name = "Creating openSUSE distrobox"
+command = ["distrobox", "create", "-n", "opensuse", "-i", "opensuse/tumbleweed:latest"]
 sudo = false

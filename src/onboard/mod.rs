@@ -6,13 +6,27 @@ pub mod ui;
 mod widgets;
 
 pub use config::OnboardConfig;
+pub use steps::StepResult;
 pub use widgets::StatusBarState;
+
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
+pub enum ExecutionMessage {
+    TaskStarted(usize),
+    TaskSuccess(usize, Option<String>),
+    TaskFailed(usize, String),
+    UserCreated(Option<String>),
+    ReviewComplete { any_failed: bool },
+    UpdateComplete { any_failed: bool },
+    StepComplete { step_result: StepResult },
+}
 
 use crate::ui::Theme;
 use crate::vim::{InputBuffer, ModeAction, VimMode};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use steps::{StepId, StepResult};
-use tracing::{info, warn};
+use steps::StepId;
+use tracing::warn;
 
 /// Actions that can be triggered by the onboard app
 #[derive(Debug)]
@@ -145,6 +159,8 @@ pub struct OnboardApp {
     pub update_category_cursor: usize,
     // Navigation: which package within the category (None = on the category header)
     pub update_package_cursor: Option<usize>,
+    // Per-category scroll offset (number of packages to skip from top)
+    pub update_category_scroll: Vec<usize>,
 
     // Status bar state - updated by content panels
     pub status_bar: StatusBarState,
@@ -243,6 +259,7 @@ impl OnboardApp {
             step_results,
             review_completed: false,
             update_completed: false,
+            update_category_scroll: vec![0; update_package_selected.len()],
             update_package_selected,
             update_category_cursor: 0,
             update_package_cursor: None,
@@ -529,6 +546,16 @@ impl OnboardApp {
                 }
             }
 
+            KeyCode::Char(c) => {
+                if self.panel_focus == PanelFocus::Content
+                    && self.content_focus == ContentFocus::Picker
+                {
+                    self.vim_mode = self.vim_mode.transition(ModeAction::EnterInsert);
+                    self.picker_filter.insert(c);
+                    self.picker_selected = 0;
+                }
+            }
+
             _ => {}
         }
         None
@@ -704,6 +731,7 @@ impl OnboardApp {
             if let Some(item) = self.current_item() {
                 if item.has_picker {
                     self.content_focus = ContentFocus::Picker;
+                    self.vim_mode = self.vim_mode.transition(ModeAction::EnterInsert);
                 } else if item.has_form {
                     self.content_focus = ContentFocus::InputField(0);
                 } else {
@@ -1050,41 +1078,22 @@ impl OnboardApp {
             if let Some(step_id) = self.current_step_id() {
                 match step_id {
                     StepId::Locale => {
-                        if !self.is_dryrun() {
-                            if let Err(e) = executor::set_locale(&item) {
-                                self.set_error(format!("Failed to set locale: {e}"));
-                                return;
-                            }
-                        }
                         self.selected_locale = Some(item.clone());
                         self.step_results[self.selected_step] = StepResult::Completed;
-                        self.set_info(format!("Locale set to: {item}"));
+                        self.set_info(format!("Locale selected: {item}"));
                     }
                     StepId::Keyboard => {
-                        if !self.is_dryrun() {
-                            if let Err(e) = executor::set_keymap(&item) {
-                                self.set_error(format!("Failed to set keyboard: {e}"));
-                                return;
-                            }
-                        }
                         self.selected_keyboard = Some(item.clone());
                         self.step_results[self.selected_step] = StepResult::Completed;
-                        self.set_info(format!("Keyboard set to: {item}"));
+                        self.set_info(format!("Keyboard selected: {item}"));
                     }
                     StepId::Preferences => {
-                        if !self.is_dryrun() {
-                            if let Err(e) = executor::set_timezone(&item) {
-                                self.set_error(format!("Failed to set timezone: {e}"));
-                                return;
-                            }
-                        }
                         self.selected_timezone = Some(item.clone());
                         self.step_results[self.selected_step] = StepResult::Completed;
-                        self.set_info(format!("Timezone set to: {item}"));
+                        self.set_info(format!("Timezone selected: {item}"));
                     }
                     _ => {}
                 }
-                // Move to next step
                 self.advance_to_next_step();
             }
         }
@@ -1290,30 +1299,88 @@ impl OnboardApp {
         true
     }
 
-    /// Execute the current step based on what step we're on (only User form)
-    pub async fn execute_current_step(&mut self) {
-        let step_id = match self.current_step_id() {
-            Some(id) => id,
-            None => return,
-        };
+    /// Start execution of the current step (User form only).
+    /// Returns a receiver for execution messages, or None if handled synchronously (dryrun/validation failure).
+    pub fn start_step_execution(&mut self) -> Option<mpsc::UnboundedReceiver<ExecutionMessage>> {
+        let step_id = self.current_step_id()?;
 
-        if step_id == StepId::User {
-            self.submit_user_form().await;
+        if step_id != StepId::User {
+            return None;
         }
+
+        if !self.validate_user_form() {
+            return None;
+        }
+
+        let username = self.username.content().to_string();
+        let password = self.password.content().to_string();
+
+        self.is_executing = true;
+        self.tasks = vec![
+            TaskStatus {
+                name: format!("Creating user '{username}'"),
+                status: TaskState::Running,
+                output: None,
+                progress: None,
+            },
+        ];
+        self.current_task = Some(0);
+
+        if self.is_dryrun() {
+            // Dryrun: immediately succeed
+            self.tasks[0].status = TaskState::Success;
+            self.created_username = Some(username);
+            self.step_results[0] = StepResult::Completed;
+            self.current_task = None;
+            self.is_executing = false;
+            self.advance_to_next_step();
+            return None;
+        }
+
+        let groups = self.config.user.groups.clone();
+        let shell = self.config.user.shell.clone();
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                executor::create_user(&username, &password, &groups, &shell)
+                    .map(|()| username)
+            }).await;
+
+            match result {
+                Ok(Ok(uname)) => {
+                    let _ = tx.send(ExecutionMessage::TaskSuccess(0, None));
+                    let _ = tx.send(ExecutionMessage::UserCreated(Some(uname)));
+                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Completed });
+                }
+                Ok(Err(e)) => {
+                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
+                    let _ = tx.send(ExecutionMessage::UserCreated(None));
+                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Failed });
+                }
+                Err(e) => {
+                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
+                    let _ = tx.send(ExecutionMessage::UserCreated(None));
+                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Failed });
+                }
+            }
+        });
+
+        Some(rx)
     }
 
-    /// Execute Review step - create user and apply all configuration
-    pub async fn execute_review(&mut self) {
+    /// Start Review step execution - create user and apply all configuration.
+    /// Returns a receiver for execution messages, or None if handled synchronously (dryrun/validation failure).
+    pub fn start_review_execution(&mut self) -> Option<mpsc::UnboundedReceiver<ExecutionMessage>> {
         // Validate user form first
         if !self.validate_user_form() {
-            return;
+            return None;
         }
 
         // In dryrun mode, use tick-based simulation with progress bars
         if self.is_dryrun() {
             self.tasks.clear();
 
-            // Build the list of tasks to simulate
             let username = self.username.content().to_string();
             self.tasks.push(TaskStatus {
                 name: format!("Creating user '{username}'"),
@@ -1322,8 +1389,7 @@ impl OnboardApp {
                 progress: Some(0),
             });
 
-            if self.selected_locale.is_some() {
-                let locale = self.selected_locale.clone().unwrap();
+            if let Some(ref locale) = self.selected_locale {
                 self.tasks.push(TaskStatus {
                     name: format!("Setting locale to {locale}"),
                     status: TaskState::Pending,
@@ -1332,8 +1398,7 @@ impl OnboardApp {
                 });
             }
 
-            if self.selected_keyboard.is_some() {
-                let keymap = self.selected_keyboard.clone().unwrap();
+            if let Some(ref keymap) = self.selected_keyboard {
                 self.tasks.push(TaskStatus {
                     name: format!("Setting keyboard to {keymap}"),
                     status: TaskState::Pending,
@@ -1342,8 +1407,7 @@ impl OnboardApp {
                 });
             }
 
-            if self.selected_timezone.is_some() {
-                let tz = self.selected_timezone.clone().unwrap();
+            if let Some(ref tz) = self.selected_timezone {
                 self.tasks.push(TaskStatus {
                     name: format!("Setting timezone to {tz}"),
                     status: TaskState::Pending,
@@ -1352,89 +1416,143 @@ impl OnboardApp {
                 });
             }
 
-            // Set created_username for dryrun mode
             self.created_username = Some(username);
-
             self.start_dryrun_simulation(DryrunCallback::CompleteReview);
-            return;
+            return None;
         }
 
         // Real execution
         self.is_executing = true;
         self.tasks.clear();
 
-        // 1. Create user account
-        self.execute_user_creation().await;
+        let username = self.username.content().to_string();
+        let password = self.password.content().to_string();
+        let groups = self.config.user.groups.clone();
+        let shell = self.config.user.shell.clone();
+        let locale = self.selected_locale.clone();
+        let keymap = self.selected_keyboard.clone();
+        let timezone = self.selected_timezone.clone();
 
-        // Check if user creation succeeded
-        if self.created_username.is_none() {
-            self.is_executing = false;
-            return;
-        }
+        // Build task list for UI
+        self.tasks.push(TaskStatus {
+            name: format!("Creating user '{username}'"),
+            status: TaskState::Running,
+            output: None,
+            progress: None,
+        });
 
-        // 2. Apply locale if selected
-        if let Some(ref locale) = self.selected_locale {
+        if let Some(ref l) = locale {
             self.tasks.push(TaskStatus {
-                name: format!("Setting locale to {locale}"),
-                status: TaskState::Running,
+                name: format!("Setting locale to {l}"),
+                status: TaskState::Pending,
                 output: None,
                 progress: None,
             });
-
-            if let Err(e) = executor::set_locale(locale) {
-                self.tasks.last_mut().unwrap().status = TaskState::Failed;
-                self.tasks.last_mut().unwrap().output = Some(e.to_string());
-            } else {
-                self.tasks.last_mut().unwrap().status = TaskState::Success;
-            }
         }
-
-        // 3. Apply keyboard if selected
-        if let Some(ref keymap) = self.selected_keyboard {
+        if let Some(ref k) = keymap {
             self.tasks.push(TaskStatus {
-                name: format!("Setting keyboard to {keymap}"),
-                status: TaskState::Running,
+                name: format!("Setting keyboard to {k}"),
+                status: TaskState::Pending,
                 output: None,
                 progress: None,
             });
-
-            if let Err(e) = executor::set_keymap(keymap) {
-                self.tasks.last_mut().unwrap().status = TaskState::Failed;
-                self.tasks.last_mut().unwrap().output = Some(e.to_string());
-            } else {
-                self.tasks.last_mut().unwrap().status = TaskState::Success;
-            }
         }
-
-        // 4. Apply timezone if selected
-        if let Some(ref tz) = self.selected_timezone {
+        if let Some(ref tz) = timezone {
             self.tasks.push(TaskStatus {
                 name: format!("Setting timezone to {tz}"),
-                status: TaskState::Running,
+                status: TaskState::Pending,
                 output: None,
                 progress: None,
             });
+        }
 
-            if let Err(e) = executor::set_timezone(tz) {
-                self.tasks.last_mut().unwrap().status = TaskState::Failed;
-                self.tasks.last_mut().unwrap().output = Some(e.to_string());
-            } else {
-                self.tasks.last_mut().unwrap().status = TaskState::Success;
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            // 1. Create user
+            let _ = tx.send(ExecutionMessage::TaskStarted(0));
+            let user_result = tokio::task::spawn_blocking({
+                let username = username.clone();
+                let password = password.clone();
+                let groups = groups.clone();
+                let shell = shell.clone();
+                move || executor::create_user(&username, &password, &groups, &shell)
+            }).await;
+
+            let user_ok = match user_result {
+                Ok(Ok(())) => {
+                    let _ = tx.send(ExecutionMessage::TaskSuccess(0, None));
+                    let _ = tx.send(ExecutionMessage::UserCreated(Some(username)));
+                    true
+                }
+                Ok(Err(e)) => {
+                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
+                    let _ = tx.send(ExecutionMessage::UserCreated(None));
+                    false
+                }
+                Err(e) => {
+                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
+                    let _ = tx.send(ExecutionMessage::UserCreated(None));
+                    false
+                }
+            };
+
+            if !user_ok {
+                let _ = tx.send(ExecutionMessage::ReviewComplete { any_failed: true });
+                return;
             }
-        }
 
-        // Mark Review step complete
-        if let Some(idx) = self.step_index_by_id(StepId::Review) {
-            self.step_results[idx] = StepResult::Completed;
-        }
+            let mut any_failed = false;
+            let mut idx: usize = 1;
 
-        // Unlock Update step
-        self.review_completed = true;
-        self.unlock_update_step();
+            // 2. Apply locale
+            if let Some(locale) = locale {
+                let _ = tx.send(ExecutionMessage::TaskStarted(idx));
+                let result = tokio::task::spawn_blocking({
+                    let locale = locale.clone();
+                    move || executor::set_locale(&locale)
+                }).await;
+                match result {
+                    Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
+                    Ok(Err(e)) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                    Err(e) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                }
+                idx += 1;
+            }
 
-        self.is_executing = false;
-        self.set_info("Configuration applied! You can now install packages.".to_string());
-        self.advance_to_next_step();
+            // 3. Apply keymap
+            if let Some(keymap) = keymap {
+                let _ = tx.send(ExecutionMessage::TaskStarted(idx));
+                let result = tokio::task::spawn_blocking({
+                    let keymap = keymap.clone();
+                    move || executor::set_keymap(&keymap)
+                }).await;
+                match result {
+                    Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
+                    Ok(Err(e)) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                    Err(e) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                }
+                idx += 1;
+            }
+
+            // 4. Apply timezone
+            if let Some(tz) = timezone {
+                let _ = tx.send(ExecutionMessage::TaskStarted(idx));
+                let result = tokio::task::spawn_blocking({
+                    let tz = tz.clone();
+                    move || executor::set_timezone(&tz)
+                }).await;
+                match result {
+                    Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
+                    Ok(Err(e)) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                    Err(e) => { any_failed = true; let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string())); }
+                }
+            }
+
+            let _ = tx.send(ExecutionMessage::ReviewComplete { any_failed });
+        });
+
+        Some(rx)
     }
 
     /// Check if any selected packages have commands that require sudo
@@ -1478,11 +1596,12 @@ impl OnboardApp {
             .any(|pkgs| pkgs.iter().any(|&s| s))
     }
 
-    /// Execute Update step - run commands from selected categories as the created user
-    pub async fn execute_update(&mut self) {
+    /// Start Update step execution - run commands from selected packages as the created user.
+    /// Returns a receiver for execution messages, or None if handled synchronously.
+    pub fn start_update_execution(&mut self) -> Option<mpsc::UnboundedReceiver<ExecutionMessage>> {
         let commands = self.selected_commands();
 
-        // If no categories selected, skip
+        // If no packages selected, skip
         if commands.is_empty() {
             if let Some(idx) = self.step_index_by_id(StepId::Update) {
                 self.step_results[idx] = StepResult::Skipped;
@@ -1491,7 +1610,7 @@ impl OnboardApp {
             self.unlock_login_step();
             self.set_info("No packages selected. Continuing to finish.".to_string());
             self.advance_to_next_step();
-            return;
+            return None;
         }
 
         // In dryrun mode, use the tick-based simulation for progress animation
@@ -1506,7 +1625,7 @@ impl OnboardApp {
                 });
             }
             self.start_dryrun_simulation(DryrunCallback::CompleteUpdate);
-            return;
+            return None;
         }
 
         // Real execution requires a user
@@ -1514,7 +1633,7 @@ impl OnboardApp {
             Some(u) => u.clone(),
             None => {
                 self.set_error("User must be created before running commands".to_string());
-                return;
+                return None;
             }
         };
 
@@ -1522,61 +1641,63 @@ impl OnboardApp {
         if self.commands_need_sudo() && !self.sudo_password_entered {
             self.sudo_password_needed = true;
             self.set_error("Enter your password for sudo commands".to_string());
-            return;
+            return None;
         }
 
         self.tasks.clear();
-
-        // Real execution
         self.is_executing = true;
-        let sudo_pass = self.sudo_password.content().to_string();
 
+        // Build task list for UI
         for cmd_config in &commands {
             self.tasks.push(TaskStatus {
                 name: cmd_config.name.clone(),
-                status: TaskState::Running,
+                status: TaskState::Pending,
                 output: None,
                 progress: None,
             });
+        }
 
-            // Execute command as the created user
-            let result = if cmd_config.sudo {
-                executor::run_command_as_user_with_sudo(
-                    &username,
-                    &cmd_config.command,
-                    &sudo_pass,
-                )
-            } else {
-                executor::run_command_as_user(&username, &cmd_config.command)
-            };
+        let sudo_pass = self.sudo_password.content().to_string();
+        let (tx, rx) = mpsc::unbounded_channel();
 
-            match result {
-                Ok(output) => {
-                    self.tasks.last_mut().unwrap().status = TaskState::Success;
-                    self.tasks.last_mut().unwrap().output = Some(output);
-                    info!("Command '{}' completed successfully", cmd_config.name);
-                }
-                Err(e) => {
-                    self.tasks.last_mut().unwrap().status = TaskState::Failed;
-                    self.tasks.last_mut().unwrap().output = Some(e.to_string());
-                    warn!("Command '{}' failed: {}", cmd_config.name, e);
-                    // Continue with other commands even if one fails
+        tokio::spawn(async move {
+            let mut any_failed = false;
+
+            for (idx, cmd_config) in commands.iter().enumerate() {
+                let _ = tx.send(ExecutionMessage::TaskStarted(idx));
+
+                let username = username.clone();
+                let sudo_pass = sudo_pass.clone();
+                let command = cmd_config.command.clone();
+                let use_sudo = cmd_config.sudo;
+
+                let result = tokio::task::spawn_blocking(move || {
+                    if use_sudo {
+                        executor::run_command_as_user_with_sudo(&username, &command, &sudo_pass)
+                    } else {
+                        executor::run_command_as_user(&username, &command)
+                    }
+                }).await;
+
+                match result {
+                    Ok(Ok(output)) => {
+                        let _ = tx.send(ExecutionMessage::TaskSuccess(idx, Some(output)));
+                    }
+                    Ok(Err(e)) => {
+                        any_failed = true;
+                        let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string()));
+                    }
+                    Err(e) => {
+                        any_failed = true;
+                        let _ = tx.send(ExecutionMessage::TaskFailed(idx, e.to_string()));
+                    }
                 }
             }
-        }
 
-        // Mark Update step complete
-        if let Some(idx) = self.step_index_by_id(StepId::Update) {
-            self.step_results[idx] = StepResult::Completed;
-        }
+            let _ = tx.send(ExecutionMessage::UpdateComplete { any_failed });
+        });
 
-        // Unlock Login step
-        self.update_completed = true;
-        self.unlock_login_step();
-
-        self.is_executing = false;
-        self.set_info("Commands completed! Click Reboot to finish setup.".to_string());
-        self.advance_to_next_step();
+        Some(rx)
     }
 
     fn step_index_by_id(&self, id: StepId) -> Option<usize> {
@@ -1611,65 +1732,78 @@ impl OnboardApp {
         }
     }
 
-    /// Submit user form and create user
-    pub async fn submit_user_form(&mut self) {
-        if !self.validate_user_form() {
-            return;
-        }
-
-        self.is_executing = true;
-        self.execute_user_creation().await;
-        self.is_executing = false;
-
-        if self.step_results[0] == StepResult::Completed {
-            self.advance_to_next_step();
-        }
-    }
-
-    async fn execute_user_creation(&mut self) {
-        let username = self.username.content().to_string();
-        let password = self.password.content().to_string();
-
-        self.tasks = vec![
-            TaskStatus {
-                name: format!("Creating user '{username}'"),
-                status: TaskState::Running,
-                output: None,
-                progress: None,
-            },
-        ];
-        self.current_task = Some(0);
-
-        if self.is_dryrun() {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            self.tasks[0].status = TaskState::Success;
-            self.created_username = Some(username);
-        } else {
-            let groups = self.config.user.groups.clone();
-            let shell = self.config.user.shell.clone();
-
-            match executor::create_user(&username, &password, &groups, &shell) {
-                Ok(()) => {
-                    self.tasks[0].status = TaskState::Success;
-                    self.created_username = Some(username);
-                    info!("User created successfully");
+    /// Handle an execution message from a background task
+    pub fn handle_execution_message(&mut self, msg: ExecutionMessage) {
+        match msg {
+            ExecutionMessage::TaskStarted(idx) => {
+                if let Some(task) = self.tasks.get_mut(idx) {
+                    task.status = TaskState::Running;
                 }
-                Err(e) => {
-                    self.tasks[0].status = TaskState::Failed;
-                    self.tasks[0].output = Some(e.to_string());
-                    self.set_error(format!("Failed to create user: {e}"));
+            }
+            ExecutionMessage::TaskSuccess(idx, output) => {
+                if let Some(task) = self.tasks.get_mut(idx) {
+                    task.status = TaskState::Success;
+                    task.output = output;
+                }
+            }
+            ExecutionMessage::TaskFailed(idx, error) => {
+                if let Some(task) = self.tasks.get_mut(idx) {
+                    task.status = TaskState::Failed;
+                    task.output = Some(error.clone());
+                }
+                self.set_error(error);
+            }
+            ExecutionMessage::UserCreated(username) => {
+                self.created_username = username;
+            }
+            ExecutionMessage::ReviewComplete { any_failed } => {
+                self.is_executing = false;
+                self.current_task = None;
+
+                if any_failed {
+                    let failed_count = self.tasks.iter().filter(|t| t.status == TaskState::Failed).count();
+                    self.set_error(format!("{} task(s) failed during configuration", failed_count));
+                } else {
+                    self.set_info("Configuration applied! You can now install packages.".to_string());
+                }
+
+                if let Some(idx) = self.step_index_by_id(StepId::Review) {
+                    self.step_results[idx] = StepResult::Completed;
+                }
+                self.review_completed = true;
+                self.unlock_update_step();
+                self.advance_to_next_step();
+            }
+            ExecutionMessage::UpdateComplete { any_failed } => {
+                self.is_executing = false;
+                self.current_task = None;
+
+                if any_failed {
+                    let failed_count = self.tasks.iter().filter(|t| t.status == TaskState::Failed).count();
+                    self.set_error(format!("{} task(s) failed during configuration", failed_count));
+                } else {
+                    self.set_info("Commands completed! Click Reboot to finish setup.".to_string());
+                }
+
+                if let Some(idx) = self.step_index_by_id(StepId::Update) {
+                    self.step_results[idx] = StepResult::Completed;
+                }
+                self.update_completed = true;
+                self.unlock_login_step();
+                self.advance_to_next_step();
+            }
+            ExecutionMessage::StepComplete { step_result } => {
+                self.is_executing = false;
+                self.current_task = None;
+
+                // User step is always index 0
+                self.step_results[0] = step_result;
+
+                if step_result == StepResult::Completed {
+                    self.advance_to_next_step();
                 }
             }
         }
-
-        // Mark user step complete (always index 0)
-        self.step_results[0] = if self.tasks[0].status == TaskState::Success {
-            StepResult::Completed
-        } else {
-            StepResult::Failed
-        };
-
-        self.current_task = None;
     }
 
     async fn execute_completion(&mut self) {

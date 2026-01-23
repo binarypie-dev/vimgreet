@@ -6,7 +6,7 @@ use crossterm::{
 };
 use hypercube_utils::error::{HypercubeError, Result};
 use hypercube_utils::event::{Event, EventHandler};
-use hypercube_utils::onboard::{OnboardApp, OnboardAction, OnboardConfig};
+use hypercube_utils::onboard::{ExecutionMessage, OnboardApp, OnboardAction, OnboardConfig};
 use hypercube_utils::system;
 use ratatui::prelude::*;
 use std::io::stdout;
@@ -119,69 +119,79 @@ async fn run_onboard(
     }
 
     let mut app = OnboardApp::new(config);
+    let mut exec_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ExecutionMessage>> = None;
 
     loop {
         // Draw UI
         terminal
-            .draw(|frame| hypercube_utils::onboard::ui::draw(frame, &app))
+            .draw(|frame| hypercube_utils::onboard::ui::draw(frame, &mut app))
             .map_err(|e| HypercubeError::Terminal(e.to_string()))?;
 
-        // Handle events
-        if let Some(event) = events.next().await {
-            match event {
-                Event::Key(key) => {
-                    if let Some(action) = app.handle_key(key) {
-                        match action {
-                            OnboardAction::LaunchExternal(program, args) => {
-                                // Leave alternate screen for external program
-                                restore_terminal()?;
-
-                                // Run external program
-                                let status = std::process::Command::new(&program)
-                                    .args(&args)
-                                    .status();
-
-                                // Re-enter alternate screen
-                                *terminal = setup_terminal()?;
-
-                                if let Err(e) = status {
-                                    app.set_error(format!("Failed to launch {}: {}", program, e));
+        tokio::select! {
+            event = events.next() => {
+                if let Some(event) = event {
+                    match event {
+                        Event::Key(key) => {
+                            if let Some(action) = app.handle_key(key) {
+                                match action {
+                                    OnboardAction::LaunchExternal(program, args) => {
+                                        restore_terminal()?;
+                                        let status = std::process::Command::new(&program)
+                                            .args(&args)
+                                            .status();
+                                        *terminal = setup_terminal()?;
+                                        if let Err(e) = status {
+                                            app.set_error(format!("Failed to launch {}: {}", program, e));
+                                        }
+                                    }
+                                    OnboardAction::Reboot => {
+                                        if let Err(e) = system::reboot(app.is_dryrun()) {
+                                            app.set_error(format!("Reboot failed: {}", e));
+                                        }
+                                    }
+                                    OnboardAction::Poweroff => {
+                                        if let Err(e) = system::poweroff(app.is_dryrun()) {
+                                            app.set_error(format!("Poweroff failed: {}", e));
+                                        }
+                                    }
+                                    OnboardAction::ExecuteStep => {
+                                        exec_rx = app.start_step_execution();
+                                    }
+                                    OnboardAction::ExecuteReview => {
+                                        exec_rx = app.start_review_execution();
+                                    }
+                                    OnboardAction::ExecuteUpdate => {
+                                        exec_rx = app.start_update_execution();
+                                    }
+                                    OnboardAction::ExitToLogin => {
+                                        app.finish_setup().await;
+                                    }
+                                    OnboardAction::TransitionToLogin => {
+                                        app.set_info("Setup complete!".to_string());
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                        return Ok(());
+                                    }
                                 }
                             }
-                            OnboardAction::Reboot => {
-                                if let Err(e) = system::reboot(app.is_dryrun()) {
-                                    app.set_error(format!("Reboot failed: {}", e));
-                                }
-                            }
-                            OnboardAction::Poweroff => {
-                                if let Err(e) = system::poweroff(app.is_dryrun()) {
-                                    app.set_error(format!("Poweroff failed: {}", e));
-                                }
-                            }
-                            OnboardAction::ExecuteStep => {
-                                app.execute_current_step().await;
-                            }
-                            OnboardAction::ExecuteReview => {
-                                app.execute_review().await;
-                            }
-                            OnboardAction::ExecuteUpdate => {
-                                app.execute_update().await;
-                            }
-                            OnboardAction::ExitToLogin => {
-                                app.finish_setup().await;
-                            }
-                            OnboardAction::TransitionToLogin => {
-                                app.set_info("Setup complete!".to_string());
-                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                                return Ok(());
-                            }
+                        }
+                        Event::Mouse => {}
+                        Event::Resize => {}
+                        Event::Tick => {
+                            app.tick();
                         }
                     }
                 }
-                Event::Mouse => {}
-                Event::Resize => {}
-                Event::Tick => {
-                    app.tick();
+            }
+            msg = async {
+                match exec_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(msg) = msg {
+                    app.handle_execution_message(msg);
+                } else {
+                    exec_rx = None;
                 }
             }
         }
