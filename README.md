@@ -1,15 +1,29 @@
-# vimgreet
+# hypercube-utils
 
-A neovim-inspired TUI greeter for [greetd](https://sr.ht/~kennylevinsen/greetd/).
+TUI utilities for Hypercube Linux.
 
-## Features
+## Binaries
+
+### hypercube-greeter
+
+A vim-inspired TUI greeter for [greetd](https://sr.ht/~kennylevinsen/greetd/).
 
 - **Full vim modal editing** - Normal, Insert, and Command modes
 - **Vim keybindings** - `hjkl` navigation, `i`/`a` to insert, `Escape` to exit
 - **Command mode** - `:reboot`, `:poweroff`, `:session`, `:user`, `:help`
 - **Session discovery** - Automatically finds Wayland and X11 sessions
 - **User discovery** - Lists available users from `/etc/passwd`
-- **Demo mode** - Test the UI without greetd using `--demo`
+- **Demo mode** - Test the UI without greetd using `--dryrun`
+
+### hypercube-onboard
+
+A first-boot onboarding wizard for system setup.
+
+- **User creation** - Create user account with password
+- **Locale/keyboard/timezone** - System configuration
+- **Network** - WiFi setup via external tool
+- **Package installation** - Flatpaks, Homebrew, Distrobox containers
+- **Vim modal editing** - Same vim keybindings as the greeter
 
 ## Installation
 
@@ -17,29 +31,32 @@ A neovim-inspired TUI greeter for [greetd](https://sr.ht/~kennylevinsen/greetd/)
 
 ```bash
 sudo dnf copr enable binarypie/hypercube
-sudo dnf install vimgreet
+sudo dnf install hypercube-utils
 ```
 
 ### From source
 
 ```bash
 cargo build --release
-sudo install -Dm755 target/release/vimgreet /usr/local/bin/vimgreet
+sudo install -Dm755 target/release/hypercube-greeter /usr/local/bin/hypercube-greeter
+sudo install -Dm755 target/release/hypercube-onboard /usr/local/bin/hypercube-onboard
 ```
 
 ## Configuration
 
-vimgreet is a TUI application that needs to run inside a terminal emulator.
+### Greeter
+
+hypercube-greeter is a TUI application that needs to run inside a terminal emulator.
 Configure greetd to launch it within a compositor like cage:
 
-### /etc/greetd/config.toml
+#### /etc/greetd/config.toml
 
 ```toml
 [terminal]
 vt = 1
 
 [default_session]
-command = "cage -s -- foot -e vimgreet"
+command = "cage -s -- foot -e hypercube-greeter"
 user = "greeter"
 ```
 
@@ -47,7 +64,7 @@ Alternative with alacritty:
 
 ```toml
 [default_session]
-command = "cage -s -- alacritty -e vimgreet"
+command = "cage -s -- alacritty -e hypercube-greeter"
 user = "greeter"
 ```
 
@@ -55,7 +72,7 @@ Alternative with ghostty:
 
 ```toml
 [default_session]
-command = "cage -s -- ghostty -e vimgreet"
+command = "cage -s -- ghostty -e hypercube-greeter"
 user = "greeter"
 ```
 
@@ -71,7 +88,15 @@ With `/etc/greetd/sway-config`:
 
 ```
 output * bg /path/to/wallpaper.png fill
-exec "foot -e vimgreet; swaymsg exit"
+exec "foot -e hypercube-greeter; swaymsg exit"
+```
+
+### Onboard
+
+hypercube-onboard reads its configuration from `/etc/hypercube/onboard.toml`. See `examples/onboard.toml` for the full config format.
+
+```bash
+hypercube-onboard --config /path/to/config.toml
 ```
 
 ## Keybindings
@@ -115,11 +140,14 @@ exec "foot -e vimgreet; swaymsg exit"
 ## Development
 
 ```bash
-# Run in demo mode
-just demo
+# Run greeter in dryrun mode
+just greeter
 
-# Run with logging
-just demo-debug
+# Run onboard in dryrun mode
+just onboard
+
+# Run onboard with a config file
+just onboard --config examples/demo.toml
 
 # Build release
 just release
