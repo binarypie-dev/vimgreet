@@ -1,7 +1,7 @@
 %global crate hypercube-utils
 
 Name:           %{crate}
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        TUI utilities for Hypercube Linux
 
