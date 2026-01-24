@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod executor;
+mod service;
 mod steps;
 pub mod ui;
 mod widgets;
@@ -9,7 +10,10 @@ pub use config::OnboardConfig;
 pub use steps::StepResult;
 pub use widgets::StatusBarState;
 
+use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use service::{OnboardService, ServiceOp};
 
 #[derive(Debug)]
 pub enum ExecutionMessage {
@@ -89,6 +93,7 @@ pub enum ConfirmAction {
 pub struct OnboardApp {
     pub config: OnboardConfig,
     pub theme: Theme,
+    service: Arc<dyn OnboardService>,
 
     // Vim mode state
     pub vim_mode: VimMode,
@@ -196,6 +201,8 @@ pub struct TaskStatus {
     pub output: Option<String>,
     /// Progress percentage (0-100) for dryrun simulation
     pub progress: Option<u8>,
+    /// System command for status bar display (dryrun mode)
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,8 +218,11 @@ impl OnboardApp {
         let menu_items = Self::build_menu_items(&config);
         let step_results = Self::initial_step_results(&menu_items);
 
+        // Create the appropriate service based on dryrun mode
+        let svc = service::create_service(config.general.dryrun);
+
         // Check network status immediately
-        let network_connected = executor::check_network(config.general.dryrun);
+        let network_connected = svc.check_network();
 
         // Initialize per-package selection based on defaults (before moving config)
         let update_package_selected: Vec<Vec<bool>> = config.updates.iter()
@@ -226,6 +236,7 @@ impl OnboardApp {
         Self {
             config,
             theme: Theme::default(),
+            service: svc,
             vim_mode: VimMode::Normal,
             command_buffer: InputBuffer::new(),
             panel_focus: PanelFocus::Welcome,
@@ -284,7 +295,17 @@ impl OnboardApp {
     fn build_menu_items(config: &OnboardConfig) -> Vec<MenuItem> {
         let mut items = Vec::new();
 
-        // 1. User creation (required)
+        // 1. Network (optional, for WiFi setup)
+        if config.network.enabled {
+            items.push(MenuItem {
+                id: StepId::Network,
+                required: false,
+                has_picker: false,
+                has_form: false,
+            });
+        }
+
+        // 2. User creation (required)
         items.push(MenuItem {
             id: StepId::User,
             required: true,
@@ -292,7 +313,7 @@ impl OnboardApp {
             has_form: true,
         });
 
-        // 2. Locale (optional)
+        // 3. Locale (optional)
         if config.locale.enabled {
             items.push(MenuItem {
                 id: StepId::Locale,
@@ -302,22 +323,12 @@ impl OnboardApp {
             });
         }
 
-        // 3. Keyboard (optional)
+        // 4. Keyboard (optional)
         if config.keyboard.enabled {
             items.push(MenuItem {
                 id: StepId::Keyboard,
                 required: false,
                 has_picker: true,
-                has_form: false,
-            });
-        }
-
-        // 4. Network (optional, for WiFi setup)
-        if config.network.enabled {
-            items.push(MenuItem {
-                id: StepId::Network,
-                required: false,
-                has_picker: false,
                 has_form: false,
             });
         }
@@ -1046,17 +1057,17 @@ impl OnboardApp {
         if let Some(item) = self.current_item() {
             match item.id {
                 StepId::Locale => {
-                    self.picker_items = executor::list_locales(self.is_dryrun());
+                    self.picker_items = self.service.list_locales();
                     self.picker_selected = 0;
                     self.picker_filter.clear();
                 }
                 StepId::Keyboard => {
-                    self.picker_items = executor::list_keymaps(self.is_dryrun());
+                    self.picker_items = self.service.list_keymaps();
                     self.picker_selected = 0;
                     self.picker_filter.clear();
                 }
                 StepId::Preferences => {
-                    self.picker_items = executor::list_timezones(self.is_dryrun());
+                    self.picker_items = self.service.list_timezones();
                     self.picker_selected = 0;
                     self.picker_filter.clear();
                 }
@@ -1315,7 +1326,9 @@ impl OnboardApp {
 
         // Mark User step as completed (form validated) and advance.
         // Actual user creation is handled by the Review step.
-        self.step_results[0] = StepResult::Completed;
+        if let Some(idx) = self.step_index_by_id(StepId::User) {
+            self.step_results[idx] = StepResult::Completed;
+        }
         self.advance_to_next_step();
         None
     }
@@ -1333,11 +1346,19 @@ impl OnboardApp {
             self.tasks.clear();
 
             let username = self.username.content().to_string();
+            let groups = self.config.user.groups.clone();
+            let shell = self.config.user.shell.clone();
+
             self.tasks.push(TaskStatus {
                 name: format!("Creating user '{username}'"),
                 status: TaskState::Pending,
                 output: None,
                 progress: Some(0),
+                command: Some(self.service.command_string(&ServiceOp::CreateUser {
+                    username: username.clone(),
+                    groups,
+                    shell,
+                })),
             });
 
             if let Some(ref locale) = self.selected_locale {
@@ -1346,6 +1367,9 @@ impl OnboardApp {
                     status: TaskState::Pending,
                     output: None,
                     progress: Some(0),
+                    command: Some(self.service.command_string(&ServiceOp::SetLocale {
+                        locale: locale.clone(),
+                    })),
                 });
             }
 
@@ -1355,6 +1379,9 @@ impl OnboardApp {
                     status: TaskState::Pending,
                     output: None,
                     progress: Some(0),
+                    command: Some(self.service.command_string(&ServiceOp::SetKeymap {
+                        keymap: keymap.clone(),
+                    })),
                 });
             }
 
@@ -1364,6 +1391,9 @@ impl OnboardApp {
                     status: TaskState::Pending,
                     output: None,
                     progress: Some(0),
+                    command: Some(self.service.command_string(&ServiceOp::SetTimezone {
+                        timezone: tz.clone(),
+                    })),
                 });
             }
 
@@ -1390,6 +1420,7 @@ impl OnboardApp {
             status: TaskState::Running,
             output: None,
             progress: None,
+            command: None,
         });
 
         if let Some(ref l) = locale {
@@ -1398,6 +1429,7 @@ impl OnboardApp {
                 status: TaskState::Pending,
                 output: None,
                 progress: None,
+                command: None,
             });
         }
         if let Some(ref k) = keymap {
@@ -1406,6 +1438,7 @@ impl OnboardApp {
                 status: TaskState::Pending,
                 output: None,
                 progress: None,
+                command: None,
             });
         }
         if let Some(ref tz) = timezone {
@@ -1414,20 +1447,23 @@ impl OnboardApp {
                 status: TaskState::Pending,
                 output: None,
                 progress: None,
+                command: None,
             });
         }
 
+        let service = Arc::clone(&self.service);
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
             // 1. Create user
             let _ = tx.send(ExecutionMessage::TaskStarted(0));
             let user_result = tokio::task::spawn_blocking({
+                let service = Arc::clone(&service);
                 let username = username.clone();
                 let password = password.clone();
                 let groups = groups.clone();
                 let shell = shell.clone();
-                move || executor::create_user(&username, &password, &groups, &shell)
+                move || service.create_user(&username, &password, &groups, &shell)
             }).await;
 
             let user_ok = match user_result {
@@ -1460,8 +1496,9 @@ impl OnboardApp {
             if let Some(locale) = locale {
                 let _ = tx.send(ExecutionMessage::TaskStarted(idx));
                 let result = tokio::task::spawn_blocking({
+                    let service = Arc::clone(&service);
                     let locale = locale.clone();
-                    move || executor::set_locale(&locale)
+                    move || service.set_locale(&locale)
                 }).await;
                 match result {
                     Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
@@ -1475,8 +1512,9 @@ impl OnboardApp {
             if let Some(keymap) = keymap {
                 let _ = tx.send(ExecutionMessage::TaskStarted(idx));
                 let result = tokio::task::spawn_blocking({
+                    let service = Arc::clone(&service);
                     let keymap = keymap.clone();
-                    move || executor::set_keymap(&keymap)
+                    move || service.set_keymap(&keymap)
                 }).await;
                 match result {
                     Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
@@ -1490,8 +1528,9 @@ impl OnboardApp {
             if let Some(tz) = timezone {
                 let _ = tx.send(ExecutionMessage::TaskStarted(idx));
                 let result = tokio::task::spawn_blocking({
+                    let service = Arc::clone(&service);
                     let tz = tz.clone();
-                    move || executor::set_timezone(&tz)
+                    move || service.set_timezone(&tz)
                 }).await;
                 match result {
                     Ok(Ok(())) => { let _ = tx.send(ExecutionMessage::TaskSuccess(idx, None)); }
@@ -1568,11 +1607,17 @@ impl OnboardApp {
         if self.is_dryrun() {
             self.tasks.clear();
             for cmd_config in &commands {
+                let op = if cmd_config.sudo {
+                    ServiceOp::RunCommandSudo { cmd: cmd_config.command.clone() }
+                } else {
+                    ServiceOp::RunCommand { cmd: cmd_config.command.clone() }
+                };
                 self.tasks.push(TaskStatus {
                     name: cmd_config.name.clone(),
                     status: TaskState::Pending,
                     output: None,
                     progress: Some(0),
+                    command: Some(self.service.command_string(&op)),
                 });
             }
             self.start_dryrun_simulation(DryrunCallback::CompleteUpdate);
@@ -1605,9 +1650,11 @@ impl OnboardApp {
                 status: TaskState::Pending,
                 output: None,
                 progress: None,
+                command: None,
             });
         }
 
+        let service = Arc::clone(&self.service);
         let sudo_pass = self.sudo_password.content().to_string();
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -1617,6 +1664,7 @@ impl OnboardApp {
             for (idx, cmd_config) in commands.iter().enumerate() {
                 let _ = tx.send(ExecutionMessage::TaskStarted(idx));
 
+                let service = Arc::clone(&service);
                 let username = username.clone();
                 let sudo_pass = sudo_pass.clone();
                 let command = cmd_config.command.clone();
@@ -1624,9 +1672,9 @@ impl OnboardApp {
 
                 let result = tokio::task::spawn_blocking(move || {
                     if use_sudo {
-                        executor::run_command_as_user_with_sudo(&username, &command, &sudo_pass)
+                        service.run_command_as_user_with_sudo(&username, &command, &sudo_pass)
                     } else {
-                        executor::run_command_as_user(&username, &command)
+                        service.run_command_as_user(&username, &command)
                     }
                 }).await;
 
@@ -1749,8 +1797,9 @@ impl OnboardApp {
                 self.is_executing = false;
                 self.current_task = None;
 
-                // User step is always index 0
-                self.step_results[0] = step_result;
+                if let Some(idx) = self.step_index_by_id(StepId::User) {
+                    self.step_results[idx] = step_result;
+                }
 
                 if step_result == StepResult::Completed {
                     self.advance_to_next_step();
@@ -1765,11 +1814,12 @@ impl OnboardApp {
             status: TaskState::Running,
             output: None,
             progress: None,
+            command: None,
         });
         self.current_task = Some(self.tasks.len() - 1);
 
-        if !self.is_dryrun() && self.config.completion.remove_initial_session {
-            if let Err(e) = executor::remove_initial_session() {
+        if self.config.completion.remove_initial_session {
+            if let Err(e) = self.service.remove_initial_session() {
                 warn!("Failed to remove initial session: {e}");
             }
         }
@@ -1801,7 +1851,7 @@ impl OnboardApp {
 
         // Check network periodically
         if self.spinner_frame == 0 {
-            self.network_connected = executor::check_network(self.is_dryrun());
+            self.network_connected = self.service.check_network();
         }
 
         // Advance dryrun simulation if active
@@ -1887,6 +1937,17 @@ impl OnboardApp {
     pub fn update_status_bar(&mut self) {
         // Handle special states first
         if self.is_executing {
+            if self.dryrun_sim_active {
+                // Show the system command for the current task in dryrun mode
+                let task_idx = self.dryrun_sim_task_idx;
+                if let Some(cmd) = self.tasks.get(task_idx).and_then(|t| t.command.clone()) {
+                    self.status_bar = StatusBarState {
+                        left_hint: cmd,
+                        right_hint: String::new(),
+                    };
+                    return;
+                }
+            }
             self.status_bar = StatusBarState::executing();
             return;
         }
