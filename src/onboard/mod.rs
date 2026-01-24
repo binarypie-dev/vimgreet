@@ -1299,8 +1299,9 @@ impl OnboardApp {
         true
     }
 
-    /// Start execution of the current step (User form only).
-    /// Returns a receiver for execution messages, or None if handled synchronously (dryrun/validation failure).
+    /// Validate and complete the User form step (no user creation happens here).
+    /// User creation is deferred to the Review step.
+    /// Returns None always (handled synchronously).
     pub fn start_step_execution(&mut self) -> Option<mpsc::UnboundedReceiver<ExecutionMessage>> {
         let step_id = self.current_step_id()?;
 
@@ -1312,61 +1313,11 @@ impl OnboardApp {
             return None;
         }
 
-        let username = self.username.content().to_string();
-        let password = self.password.content().to_string();
-
-        self.is_executing = true;
-        self.tasks = vec![
-            TaskStatus {
-                name: format!("Creating user '{username}'"),
-                status: TaskState::Running,
-                output: None,
-                progress: None,
-            },
-        ];
-        self.current_task = Some(0);
-
-        if self.is_dryrun() {
-            // Dryrun: immediately succeed
-            self.tasks[0].status = TaskState::Success;
-            self.created_username = Some(username);
-            self.step_results[0] = StepResult::Completed;
-            self.current_task = None;
-            self.is_executing = false;
-            self.advance_to_next_step();
-            return None;
-        }
-
-        let groups = self.config.user.groups.clone();
-        let shell = self.config.user.shell.clone();
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                executor::create_user(&username, &password, &groups, &shell)
-                    .map(|()| username)
-            }).await;
-
-            match result {
-                Ok(Ok(uname)) => {
-                    let _ = tx.send(ExecutionMessage::TaskSuccess(0, None));
-                    let _ = tx.send(ExecutionMessage::UserCreated(Some(uname)));
-                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Completed });
-                }
-                Ok(Err(e)) => {
-                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
-                    let _ = tx.send(ExecutionMessage::UserCreated(None));
-                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Failed });
-                }
-                Err(e) => {
-                    let _ = tx.send(ExecutionMessage::TaskFailed(0, e.to_string()));
-                    let _ = tx.send(ExecutionMessage::UserCreated(None));
-                    let _ = tx.send(ExecutionMessage::StepComplete { step_result: StepResult::Failed });
-                }
-            }
-        });
-
-        Some(rx)
+        // Mark User step as completed (form validated) and advance.
+        // Actual user creation is handled by the Review step.
+        self.step_results[0] = StepResult::Completed;
+        self.advance_to_next_step();
+        None
     }
 
     /// Start Review step execution - create user and apply all configuration.
@@ -1763,16 +1714,18 @@ impl OnboardApp {
                 if any_failed {
                     let failed_count = self.tasks.iter().filter(|t| t.status == TaskState::Failed).count();
                     self.set_error(format!("{} task(s) failed during configuration", failed_count));
+                    if let Some(idx) = self.step_index_by_id(StepId::Review) {
+                        self.step_results[idx] = StepResult::Failed;
+                    }
                 } else {
                     self.set_info("Configuration applied! You can now install packages.".to_string());
+                    if let Some(idx) = self.step_index_by_id(StepId::Review) {
+                        self.step_results[idx] = StepResult::Completed;
+                    }
+                    self.review_completed = true;
+                    self.unlock_update_step();
+                    self.advance_to_next_step();
                 }
-
-                if let Some(idx) = self.step_index_by_id(StepId::Review) {
-                    self.step_results[idx] = StepResult::Completed;
-                }
-                self.review_completed = true;
-                self.unlock_update_step();
-                self.advance_to_next_step();
             }
             ExecutionMessage::UpdateComplete { any_failed } => {
                 self.is_executing = false;
