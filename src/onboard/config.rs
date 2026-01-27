@@ -249,6 +249,7 @@ pub struct UpdateCategory {
     #[serde(default)]
     pub enabled_by_default: bool,
     /// Packages available in this category
+    #[serde(default)]
     pub packages: Vec<PackageItem>,
 }
 

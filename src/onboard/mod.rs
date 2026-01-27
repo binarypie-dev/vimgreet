@@ -1058,17 +1058,26 @@ impl OnboardApp {
             match item.id {
                 StepId::Locale => {
                     self.picker_items = self.service.list_locales();
-                    self.picker_selected = 0;
+                    self.picker_selected = self.picker_items
+                        .iter()
+                        .position(|l| l == &self.config.locale.default_locale)
+                        .unwrap_or(0);
                     self.picker_filter.clear();
                 }
                 StepId::Keyboard => {
                     self.picker_items = self.service.list_keymaps();
-                    self.picker_selected = 0;
+                    self.picker_selected = self.picker_items
+                        .iter()
+                        .position(|k| k == &self.config.keyboard.default_layout)
+                        .unwrap_or(0);
                     self.picker_filter.clear();
                 }
                 StepId::Preferences => {
                     self.picker_items = self.service.list_timezones();
-                    self.picker_selected = 0;
+                    self.picker_selected = self.picker_items
+                        .iter()
+                        .position(|t| t == &self.config.preferences.default_timezone)
+                        .unwrap_or(0);
                     self.picker_filter.clear();
                 }
                 StepId::Update => {
@@ -1766,12 +1775,21 @@ impl OnboardApp {
                         self.step_results[idx] = StepResult::Failed;
                     }
                 } else {
-                    self.set_info("Configuration applied! You can now install packages.".to_string());
                     if let Some(idx) = self.step_index_by_id(StepId::Review) {
                         self.step_results[idx] = StepResult::Completed;
                     }
                     self.review_completed = true;
-                    self.unlock_update_step();
+                    self.tasks.clear();
+
+                    // If no Update step, unlock Reboot directly
+                    if self.step_index_by_id(StepId::Update).is_none() {
+                        self.update_completed = true;
+                        self.unlock_login_step();
+                        self.set_info("Configuration applied! Reboot to finish setup.".to_string());
+                    } else {
+                        self.unlock_update_step();
+                        self.set_info("Configuration applied! You can now install packages.".to_string());
+                    }
                     self.advance_to_next_step();
                 }
             }
@@ -1894,9 +1912,17 @@ impl OnboardApp {
                             self.step_results[idx] = StepResult::Completed;
                         }
                         self.review_completed = true;
-                        self.unlock_update_step();
                         self.tasks.clear();
-                        self.set_info("Configuration applied! Select packages to install.".to_string());
+
+                        // If no Update step, unlock Reboot directly
+                        if self.step_index_by_id(StepId::Update).is_none() {
+                            self.update_completed = true;
+                            self.unlock_login_step();
+                            self.set_info("Configuration applied! Reboot to finish setup.".to_string());
+                        } else {
+                            self.unlock_update_step();
+                            self.set_info("Configuration applied! Select packages to install.".to_string());
+                        }
                         self.advance_to_next_step();
                     }
                 }

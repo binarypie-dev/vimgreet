@@ -70,11 +70,15 @@ pub fn draw_picker(frame: &mut Frame, area: Rect, app: &OnboardApp, title: &str,
     let button_y = area.y + area.height.saturating_sub(4);
     let list_height = button_y.saturating_sub(y + 1) as usize;
 
-    // Calculate scroll
-    let scroll_offset = if app.picker_selected >= list_height {
-        app.picker_selected - list_height + 1
-    } else {
+    // Calculate scroll - try to center the selected item
+    let scroll_offset = if filtered.len() <= list_height {
+        // All items fit, no scrolling needed
         0
+    } else {
+        // Try to center the selected item, but respect list boundaries
+        let ideal = app.picker_selected.saturating_sub(list_height / 2);
+        let max_scroll = filtered.len() - list_height;
+        ideal.min(max_scroll)
     };
 
     for (i, item) in filtered.iter().skip(scroll_offset).take(list_height).enumerate() {

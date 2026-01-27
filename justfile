@@ -22,11 +22,11 @@ greeter-release *ARGS: release
 
 # Run onboard wizard in demo mode
 onboard *ARGS: build
-    ./target/debug/hypercube-onboard --dryrun {{ARGS}}
+    ./target/debug/hypercube-onboard --config examples/demo.toml {{ARGS}}
 
 # Run onboard wizard in release mode
 onboard-release *ARGS: release
-    ./target/release/hypercube-onboard --dryrun {{ARGS}}
+    ./target/release/hypercube-onboard --config examples/demo.toml {{ARGS}}
 
 # Run tests
 test:
